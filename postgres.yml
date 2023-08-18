@@ -1,0 +1,80 @@
+- name: Install and configure PostgreSQL
+  hosts: local
+  become_method: sudo
+  become: yes
+  vars_files:
+    - vars.yml
+
+  tasks:
+    - name: Install PostgreSQL and related packages
+      apt:
+        name:
+          - "{{ postgres_pkg }}"
+          - "{{ postgresql_contrib }}"
+          - python3-psycopg2
+        state: present
+
+    - name: "Find out if PostgreSQL is initialized"
+      ansible.builtin.stat:
+        path: "/var/lib/pgsql/data/pg_hba.conf"
+      register: postgres_data
+
+    - name: "Initialize PostgreSQL"
+      shell: "pg_ctlcluster {{ version }} main start"
+      when: not postgres_data.stat.exists
+
+    - name: "Start and enable services"
+      service:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      with_items:
+        - postgresql
+
+    - name: Create a PostgreSQL database
+      postgresql_db:
+        name: "{{ db_name }}"
+        state: present
+      become_user: postgres
+      become: yes
+
+    - name: Create a PostgreSQL user
+      postgresql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        state: present
+      become_user: postgres
+      become: yes
+
+    - name: "Grant db user access to app db"
+      postgresql_privs:
+        type: database
+        database: "{{ db_name }}"
+        roles: "{{ db_user }}"
+        grant_option: no
+        privs: all
+      become: yes
+      become_user: postgres
+
+    - name: "Allow md5 connection for the db user"
+      postgresql_pg_hba:
+        dest: "/etc/postgresql/{{ version }}/main/pg_hba.conf"
+        contype: host
+        databases: all
+        method: md5
+        users: "{{ db_user }}"
+        create: true
+      become: yes
+      become_user: postgres
+      notify: Restart PostgreSQL service
+
+  vars:
+    postgres_pkg: "{{ 'postgresql-14' if ansible_distribution_version == '22.04' else 'postgresql' }}"
+    postgresql_contrib: "{{ 'postgresql-contrib-14' if ansible_distribution_version == '22.04' else 'postgresql-contrib'}}"
+    version: "{{ '14' if ansible_distribution_version == '22.04' else '12'}}"
+
+  handlers:
+    - name: Restart PostgreSQL service
+      ansible.builtin.service:
+        name: postgresql
+        state: restarted

@@ -1,0 +1,5 @@
+db_name: mydatabase 
+db_user: myuser1 
+db_password: mypassword 
+ansible_become_password: #password
+ansible_ssh_pipelining: true
